@@ -1,5 +1,5 @@
 # Copy this file to .github/workflows/tender-index.yml in a source repository.
-# Replace <PINNED_TENDER_INDEX_COMMIT> before enabling it.
+# The engine checkout is pinned to a reviewed immutable Tender Index commit.
 name: Tender Index
 
 on:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: tenderfabric/tender-index
-          ref: REPLACE_WITH_PINNED_TENDER_INDEX_COMMIT
+          ref: 3072940435273adc57a53e54d70edee9e4c38f54
           path: engine
           persist-credentials: false
 

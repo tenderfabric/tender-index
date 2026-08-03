@@ -79,9 +79,9 @@ entries.
 ## GitHub Actions and GHCR
 
 [`tender-index.yml.example`](../.github/tender-index.yml.example) is an inactive
-template for a source repository. Before using it, replace the Tender Index
-checkout placeholder with an immutable commit from the public
-`tenderfabric/tender-index` repository.
+template for a source repository. Its Tender Index checkout is pinned to a
+reviewed immutable commit from the public `tenderfabric/tender-index`
+repository; update that pin deliberately when adopting a newer engine.
 
 The workflow builds the project index from a clean GitHub checkout and pushes
 the two artifact files as one OCI artifact to:
