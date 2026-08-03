@@ -4,33 +4,52 @@
 > [`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp),
 > originally developed by DeusData and released under the MIT License.**
 
-The upstream project provides the high-performance C indexing engine,
-tree-sitter language parsers, graph store, structural and semantic queries,
-and core MCP implementation. Tender Fabric builds on that foundation with:
+**Give every AI coding tool an already-built understanding of your codebase.**
 
-- one `tender-index` command and an isolated Tender install path;
-- a commit-addressed, SHA-256-bound project artifact;
-- CI generation and private OCI/GHCR distribution;
-- verified base indexes plus local branch or pull-request overlays;
-- a curated project **Map** with explicit producer and provenance metadata; and
-- a no-surprises boundary that never silently edits an AI client's configuration.
+Tender Index turns a Git repository into a reusable code map that people,
+Claude, Codex, and other MCP-compatible tools can query instead of rediscovering
+the project in every session.
 
-See [UPSTREAM.md](UPSTREAM.md) for the complete attribution and a precise split
-between upstream work and Tender additions.
+## What it does
 
-**A durable, verified map of a software project—for people and AI tools.**
+- Finds symbols and source with BM25 full-text search.
+- Supports local semantic vector queries without sending source code to an
+  embedding API.
+- Maps definitions, calls, imports, routes, references, and dependencies.
+- Traces execution paths and returns cited source snippets.
+- Shows architecture, package boundaries, services, hotspots, and deterministic
+  Leiden communities.
+- Reports indexing coverage so an answer can disclose what the map may have
+  missed.
 
-Tender Index turns a Git repository into a reusable project artifact: code
-structure, symbols, calls, imports, routes, dependencies, hotspots, and
-deterministic communities. Build it once for a commit in GitHub Actions, verify
-the exact bytes locally, overlay the current working tree, and query it through
-one command or MCP.
+## What comes from the parent project
 
-The public Tender layer turns that engine into a reusable project lifecycle.
-Its Map is built from calls, imports, routes, hotspots, package boundaries,
-services, layers, and Leiden communities. Its analysis-only MCP doorway can be
-connected to any compatible agent without Tender automatically editing Claude,
-Codex, Cursor, Devin, or another client.
+[`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp)
+provides the substantial technical foundation: the high-performance C engine,
+tree-sitter language parsers, BM25 index, local semantic search, code graph,
+graph store, structural and semantic query tools, architecture analysis, and
+core MCP server.
+
+That project provides a sophisticated **code graph**. It does not include the
+separate Graphify system, and Tender Index does not represent it as if it did.
+
+## What Tender Fabric adds
+
+Tender turns that engine into a durable project memory that can be built once
+and safely reused:
+
+- one `tender-index` command with an isolated Tender installation;
+- a private project artifact tied to an exact Git commit and SHA-256 digest;
+- automatic generation in GitHub Actions and private distribution through
+  OCI/GHCR;
+- a verified base index with a fast overlay for the current branch or pull
+  request;
+- a versioned Map contract that records its producer and the provenance of each
+  kind of signal; and
+- explicit MCP setup that never silently rewrites an AI client's configuration.
+
+See [UPSTREAM.md](UPSTREAM.md) for the complete attribution and the precise
+boundary between upstream work and Tender additions.
 
 Your graph is derived from your source code. Keep its package private whenever
 the repository is private.
@@ -132,10 +151,9 @@ code. Its default map is deterministic:
 | Communities | Deterministic Leiden clustering over the project graph. |
 | Coverage | Files or ranges the parser could not completely represent. |
 
-That gives an agent the useful part of a Graphify-style project memory—an
-already-built graph, central nodes, communities, paths, and explanations—while
-keeping every answer traceable to the indexed repository. It is a code map,
-not a claim that inferred structure is source truth.
+This is a deterministic code map built from the parent engine's extracted
+graph. It is not the separate Graphify semantic-enrichment pipeline, and it
+does not present inferred project relationships as source truth.
 
 ## The artifact lifecycle
 
