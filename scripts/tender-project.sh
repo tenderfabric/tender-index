@@ -121,6 +121,9 @@ verify_artifact() {
 
 command="${1:-}"
 [[ -n "$command" ]] || { usage; exit 2; }
+case "$command" in
+    -h|--help) usage; exit 0 ;;
+esac
 shift
 
 repo=""

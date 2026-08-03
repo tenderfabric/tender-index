@@ -1,0 +1,61 @@
+name: Tender Index CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tender-index-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install build dependency
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+
+      - name: Validate project wrapper
+        run: |
+          bash -n scripts/tender-project.sh
+          scripts/tender-project.sh --help
+
+      - name: Build Tender Index
+        run: scripts/build.sh
+
+      - name: Prove build, verify, load, and search
+        run: |
+          fixture="$RUNNER_TEMP/tender-index-fixture"
+          artifact="$RUNNER_TEMP/tender-index-artifact"
+          cache="$RUNNER_TEMP/tender-index-cache"
+          mkdir -p "$fixture/src"
+          printf '%s\n' 'int tender_add(int a, int b) { return a + b; }' > "$fixture/src/math.c"
+          git -C "$fixture" init -q
+          git -C "$fixture" config user.name 'Tender Index CI'
+          git -C "$fixture" config user.email 'ci@tender.invalid'
+          git -C "$fixture" add src/math.c
+          git -C "$fixture" commit -qm fixture
+          scripts/tender-project.sh build \
+            --repo "$fixture" \
+            --output "$artifact" \
+            --binary "$GITHUB_WORKSPACE/build/c/codebase-memory-mcp"
+          scripts/tender-project.sh verify --artifact-root "$artifact" --repo "$fixture"
+          scripts/tender-project.sh load \
+            --repo "$fixture" \
+            --artifact-root "$artifact" \
+            --cache-dir "$cache" \
+            --binary "$GITHUB_WORKSPACE/build/c/codebase-memory-mcp"
+          CBM_CACHE_DIR="$cache" build/c/codebase-memory-mcp cli --json search_graph \
+            '{"query":"tender_add","project":"tender-index-fixture"}' \
+            | grep -q 'src/math.c'

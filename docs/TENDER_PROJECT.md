@@ -78,6 +78,11 @@ entries.
 
 ## GitHub Actions and GHCR
 
+This repository proves the path on every `main` commit through
+[`project-index.yml`](../.github/workflows/project-index.yml), publishing its
+own verified index to `ghcr.io/tenderfabric/tender-index-project-index` under a
+`sha-<source-commit>` tag.
+
 [`tender-index.yml.example`](../.github/tender-index.yml.example) is an inactive
 template for a source repository. Its Tender Index checkout is pinned to a
 reviewed immutable commit from the public `tenderfabric/tender-index`
