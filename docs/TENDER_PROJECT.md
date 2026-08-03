@@ -7,9 +7,8 @@ project layer makes that artifact safe to build in CI, address by source
 commit, verify, and load without running the upstream installer or editing any
 agent configuration.
 
-This work is local and pre-publication. The future repository owner is
-`tenderfabric`; no other account, organization, credential, or repository is
-part of the design.
+The repository owner is `tenderfabric`; no other account, organization,
+credential, or repository is part of the design.
 
 ## What is in the open project layer
 
@@ -81,7 +80,7 @@ entries.
 
 [`tender-index.yml.example`](../.github/tender-index.yml.example) is an inactive
 template for a source repository. Before using it, replace the Tender Index
-checkout placeholder with an immutable commit from the eventual public
+checkout placeholder with an immutable commit from the public
 `tenderfabric/tender-index` repository.
 
 The workflow builds the project index from a clean GitHub checkout and pushes

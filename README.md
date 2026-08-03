@@ -1,12 +1,31 @@
-# codebase-memory-mcp
+# Tender Index
 
-> **Tender Fabric fork status** — This private, pre-publication branch is being
-> developed by **Tender Fabric** (`tenderfabric`) as Tender Index. It preserves
+> **Tender Fabric project** — Tender Index is developed by **Tender Fabric**
+> (`tenderfabric`) as a focused fork of `DeusData/codebase-memory-mcp`. It preserves
 > the upstream MIT license and attribution while adding detached,
 > commit-addressed project artifacts that can be built in CI without running
 > the installer or changing agent configuration. See
 > [TENDER_FORK.md](TENDER_FORK.md) and
 > [docs/TENDER_PROJECT.md](docs/TENDER_PROJECT.md).
+
+## Commit-addressed project indexes
+
+Build the engine, create a verified index artifact for a clean Git commit, and
+load that artifact as the base for a local checkout:
+
+```bash
+scripts/build.sh
+scripts/tender-project.sh build --repo /path/to/project --output /tmp/project-index
+scripts/tender-project.sh verify --artifact-root /tmp/project-index --repo /path/to/project
+scripts/tender-project.sh load --repo /path/to/project --artifact-root /tmp/project-index
+```
+
+The wrapper does not install hooks, start background services, or alter Claude,
+Codex, Cursor, Devin, or other agent configuration. An inactive GitHub
+Actions/GHCR template is available at
+[`.github/tender-index.yml.example`](.github/tender-index.yml.example).
+
+## Upstream engine
 
 [![GitHub Release](https://img.shields.io/github/v/release/DeusData/codebase-memory-mcp?style=flat&color=blue)](https://github.com/DeusData/codebase-memory-mcp/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
