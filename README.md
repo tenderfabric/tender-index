@@ -36,14 +36,20 @@ separate Graphify system, and Tender Index does not represent it as if it did.
 ## What Tender Fabric adds
 
 Tender turns that engine into a durable project memory that can be built once
-and safely reused:
+and reused with integrity verification:
 
 - one `tender-index` command with an isolated Tender installation;
 - a private project artifact tied to an exact Git commit and SHA-256 digest;
 - automatic generation in GitHub Actions and private distribution through
   OCI/GHCR;
-- a verified base index with a fast overlay for the current branch or pull
-  request;
+- an integrity-verified base-index artifact with a local-checkout overlay for
+  the current branch. Fast reuse across machines or clone paths is not yet
+  complete: upstream
+  [#885](https://github.com/DeusData/codebase-memory-mcp/issues/885) tracks
+  project-identity translation, while
+  [#867](https://github.com/DeusData/codebase-memory-mcp/issues/867) and
+  [#868–#870](https://github.com/DeusData/codebase-memory-mcp/pull/868) track
+  reconciliation performance;
 - a versioned Map contract that records its producer and the provenance of each
   kind of signal; and
 - explicit MCP setup that never silently rewrites an AI client's configuration.
