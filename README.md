@@ -1,5 +1,23 @@
 # Tender Index
 
+> **Tender Index is a fork of
+> [`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp),
+> originally developed by DeusData and released under the MIT License.**
+
+The upstream project provides the high-performance C indexing engine,
+tree-sitter language parsers, graph store, structural and semantic queries,
+and core MCP implementation. Tender Fabric builds on that foundation with:
+
+- one `tender-index` command and an isolated Tender install path;
+- a commit-addressed, SHA-256-bound project artifact;
+- CI generation and private OCI/GHCR distribution;
+- verified base indexes plus local branch or pull-request overlays;
+- a curated project **Map** with explicit producer and provenance metadata; and
+- a no-surprises boundary that never silently edits an AI client's configuration.
+
+See [UPSTREAM.md](UPSTREAM.md) for the complete attribution and a precise split
+between upstream work and Tender additions.
+
 **A durable, verified map of a software project—for people and AI tools.**
 
 Tender Index turns a Git repository into a reusable project artifact: code
@@ -8,17 +26,11 @@ deterministic communities. Build it once for a commit in GitHub Actions, verify
 the exact bytes locally, overlay the current working tree, and query it through
 one command or MCP.
 
-It is not a renamed installer for another MCP server. The public Tender layer
-adds the project lifecycle the raw engine does not provide:
-
-- one `tender-index` command and one explicit install path;
-- a commit-addressed, SHA-256-bound project artifact;
-- CI generation and private OCI/GHCR distribution;
-- verified base plus local branch or pull-request overlay;
-- a curated project **Map** built from calls, imports, routes, hotspots,
-  package boundaries, services, layers, and Leiden communities;
-- a read-only MCP doorway that can be connected to any compatible agent; and
-- no automatic edits to Claude, Codex, Cursor, Devin, or any other client.
+The public Tender layer turns that engine into a reusable project lifecycle.
+Its Map is built from calls, imports, routes, hotspots, package boundaries,
+services, layers, and Leiden communities. Its analysis-only MCP doorway can be
+connected to any compatible agent without Tender automatically editing Claude,
+Codex, Cursor, Devin, or another client.
 
 Your graph is derived from your source code. Keep its package private whenever
 the repository is private.
@@ -156,14 +168,15 @@ See [Tender project artifacts](docs/TENDER_PROJECT.md) for the artifact format
 and operational details, and [fork boundary](TENDER_FORK.md) for the line
 between this repository and the private product.
 
-## Upstream engine and attribution
+## Credits and attribution
 
 Tender Index is a focused fork of the MIT-licensed
 [`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp).
 That project supplies the high-performance C engine, tree-sitter language
 parsers, graph store, structural queries, and core MCP implementation. Tender
 Fabric preserves its copyright, MIT license, and notices in
-[LICENSE](LICENSE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+[LICENSE](LICENSE), [UPSTREAM.md](UPSTREAM.md), and
+[THIRD_PARTY.md](THIRD_PARTY.md).
 
 Tender Fabric's work is the Tender install and command surface, verified
 project-artifact lifecycle, GitHub/OCI distribution, local overlay contract,

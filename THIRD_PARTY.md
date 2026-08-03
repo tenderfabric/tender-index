@@ -5,6 +5,16 @@ maintainers of these projects for making their work freely available.
 Every vendored component directory carries the upstream `LICENSE`
 (or `COPYING` / `NOTICE`) file alongside the sources.
 
+## Upstream codebase-memory-mcp engine
+
+Tender Index is a fork of
+[`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp),
+Copyright (c) 2025 DeusData, licensed under MIT. The upstream project supplies
+the core C indexing engine, parser integration, graph store, query machinery,
+and MCP implementation. Its MIT notice is preserved in [LICENSE](LICENSE), and
+the exact upstream/Tender contribution boundary is described in
+[UPSTREAM.md](UPSTREAM.md).
+
 ## Tree-sitter Runtime
 
 The tree-sitter C runtime is vendored in `internal/cbm/vendored/ts_runtime/`.
