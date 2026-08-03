@@ -35,6 +35,13 @@ enum {
 int cbm_artifact_export(const char *db_path, const char *repo_path, const char *project_name,
                         int quality);
 
+/* Export to artifact_root/.codebase-memory/ instead of modifying the source
+ * repository. source_repo_path is used only for commit identity; no files are
+ * written there and no git attributes are changed. This is the project-index
+ * seam used by CI/registry workflows. */
+int cbm_artifact_export_to(const char *db_path, const char *source_repo_path,
+                           const char *artifact_root, const char *project_name, int quality);
+
 /* Get details for the most recent export failure on this thread.
  * Returns NULL if no export error is recorded. */
 const char *cbm_artifact_export_last_error(void);
@@ -43,6 +50,20 @@ const char *cbm_artifact_export_last_error(void);
  * Decompresses, runs integrity check, recreates indexes.
  * Returns 0 on success, -1 on error. */
 int cbm_artifact_import(const char *repo_path, const char *cache_db_path);
+
+/* Import a detached project artifact only when a valid payload digest is
+ * present and matches. This combines verification and import so callers do
+ * not create a verify/use race. */
+int cbm_artifact_import_verified(const char *artifact_root, const char *cache_db_path);
+
+/* Verify the compressed payload against artifact.json. When require_digest is
+ * true, legacy artifacts without artifact_sha256 are rejected. */
+bool cbm_artifact_verify(const char *artifact_root, bool require_digest);
+
+/* Return true only when the artifact's recorded source commit is an ancestor
+ * of the repository's current HEAD. Both the commit and repository path are
+ * validated before invoking git. */
+bool cbm_artifact_commit_is_ancestor(const char *artifact_root, const char *repo_path);
 
 /* Check if a compatible artifact exists in repo_path/.codebase-memory/.
  * Returns true only if both graph.db.zst and artifact.json exist

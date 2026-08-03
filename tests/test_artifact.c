@@ -503,8 +503,7 @@ TEST(store_deep_integrity_detects_page_corruption) {
         char name[64];
         char qn[192];
         snprintf(name, sizeof(name), "deep_probe_%04d", i);
-        snprintf(qn, sizeof(qn), "deep.rather.long.module.path.for.page.fill.%s_pad_pad_pad",
-                 name);
+        snprintf(qn, sizeof(qn), "deep.rather.long.module.path.for.page.fill.%s_pad_pad_pad", name);
         cbm_node_t n = {.project = "deep",
                         .label = "Function",
                         .name = name,
@@ -543,7 +542,69 @@ TEST(store_deep_integrity_detects_page_corruption) {
     PASS();
 }
 
+TEST(artifact_detached_export_is_digest_bound_and_source_clean) {
+    setup_artifact_test();
+    create_test_db(g_db);
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/output", g_tmpdir);
+    ASSERT_TRUE(cbm_mkdir_p(output, 0755));
+    ASSERT_EQ(cbm_artifact_export_to(g_db, g_repo, output, "test-proj", CBM_ARTIFACT_FAST), 0);
+
+    char source_artifact[1024];
+    snprintf(source_artifact, sizeof(source_artifact), "%s/.codebase-memory/graph.db.zst", g_repo);
+    ASSERT_NEQ(access(source_artifact, F_OK), 0);
+
+    char output_attributes[1024];
+    snprintf(output_attributes, sizeof(output_attributes), "%s/.codebase-memory/.gitattributes",
+             output);
+    ASSERT_NEQ(access(output_attributes, F_OK), 0);
+    ASSERT_TRUE(cbm_artifact_verify(output, true));
+
+    char payload[1024];
+    snprintf(payload, sizeof(payload), "%s/.codebase-memory/graph.db.zst", output);
+    FILE *fp = fopen(payload, "ab");
+    ASSERT_NOT_NULL(fp);
+    ASSERT_EQ(fputc('x', fp), 'x');
+    ASSERT_EQ(fclose(fp), 0);
+    ASSERT_FALSE(cbm_artifact_verify(output, true));
+
+    char import_db[1024];
+    snprintf(import_db, sizeof(import_db), "%s/tampered.db", g_tmpdir);
+    ASSERT_NEQ(cbm_artifact_import(output, import_db), 0);
+    cleanup_dir(g_tmpdir);
+    PASS();
+}
+
+TEST(artifact_detached_commit_must_be_repo_ancestor) {
+    setup_artifact_test();
+    create_test_db(g_db);
+    char source[1024];
+    snprintf(source, sizeof(source), "%s/main.c", g_repo);
+    write_text_file(source, "int main(void) { return 0; }\n");
+
+    char command[4096];
+    snprintf(command, sizeof(command),
+             "git -C '%s' init -q && git -C '%s' config user.name test && "
+             "git -C '%s' config user.email test@example.invalid && git -C '%s' add main.c && "
+             "git -C '%s' commit -qm initial",
+             g_repo, g_repo, g_repo, g_repo, g_repo);
+    ASSERT_EQ(system(command), 0);
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/output", g_tmpdir);
+    ASSERT_TRUE(cbm_mkdir_p(output, 0755));
+    ASSERT_EQ(cbm_artifact_export_to(g_db, g_repo, output, "test-proj", CBM_ARTIFACT_FAST), 0);
+    ASSERT_TRUE(cbm_artifact_verify(output, true));
+    ASSERT_TRUE(cbm_artifact_commit_is_ancestor(output, g_repo));
+
+    cleanup_dir(g_tmpdir);
+    PASS();
+}
+
 SUITE(artifact) {
+    RUN_TEST(artifact_detached_export_is_digest_bound_and_source_clean);
+    RUN_TEST(artifact_detached_commit_must_be_repo_ancestor);
     RUN_TEST(artifact_fast_export_snapshots_live_wal_store);
     RUN_TEST(store_deep_integrity_detects_page_corruption);
     RUN_TEST(artifact_repo_path_shell_safe_accepts_plain_and_spaced);

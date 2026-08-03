@@ -84,7 +84,8 @@ struct cbm_pipeline {
     cbm_index_mode_t mode;
     atomic_int cancelled_storage;
     atomic_int *cancelled;
-    bool persistence; /* write .codebase-memory/graph.db.zst after indexing */
+    bool persistence;    /* write .codebase-memory/graph.db.zst after indexing */
+    char *artifact_root; /* optional detached project-artifact destination */
 
     /* Indexing state (set during run) */
     cbm_gbuf_t *gbuf;
@@ -204,6 +205,19 @@ void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled) {
     }
 }
 
+bool cbm_pipeline_set_artifact_root(cbm_pipeline_t *p, const char *artifact_root) {
+    if (!p) {
+        return false;
+    }
+    char *copy = artifact_root && artifact_root[0] ? strdup(artifact_root) : NULL;
+    if (artifact_root && artifact_root[0] && !copy) {
+        return false;
+    }
+    free(p->artifact_root);
+    p->artifact_root = copy;
+    return true;
+}
+
 bool cbm_pipeline_set_project_name(cbm_pipeline_t *p, const char *name) {
     if (!p || !name || !name[0]) {
         return false;
@@ -232,6 +246,7 @@ void cbm_pipeline_free(cbm_pipeline_t *p) {
     free(p->repo_path);
     free(p->db_path);
     free(p->project_name);
+    free(p->artifact_root);
     cbm_discover_free_excluded(p->excluded_dirs, p->excluded_count);
     p->excluded_dirs = NULL;
     p->excluded_count = 0;
@@ -1812,7 +1827,11 @@ static int seal_staging_db(const char *staging_path) {
 static int export_after_publish(cbm_pipeline_t *p, const char *final_path, bool was_incremental) {
     if (p->persistence) {
         CBM_PROF_START(t_art);
-        int rc = cbm_artifact_export(final_path, p->repo_path, p->project_name, CBM_ARTIFACT_BEST);
+        int rc =
+            p->artifact_root
+                ? cbm_artifact_export_to(final_path, p->repo_path, p->artifact_root,
+                                         p->project_name, CBM_ARTIFACT_BEST)
+                : cbm_artifact_export(final_path, p->repo_path, p->project_name, CBM_ARTIFACT_BEST);
         CBM_PROF_END("persist", "6_artifact_export", t_art);
         if (rc != 0) {
             const char *err = cbm_artifact_export_last_error();

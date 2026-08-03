@@ -53,6 +53,11 @@ cbm_pipeline_t *cbm_pipeline_new(const char *repo_path, const char *db_path, cbm
  * When enabled, the pipeline writes a compressed artifact after indexing. */
 void cbm_pipeline_set_persistence(cbm_pipeline_t *p, bool enabled);
 
+/* Direct persistent artifact output to artifact_root/.codebase-memory/.
+ * The source repository remains untouched. NULL restores repository-local
+ * export behavior. Returns false only on allocation failure. */
+bool cbm_pipeline_set_artifact_root(cbm_pipeline_t *p, const char *artifact_root);
+
 /* Free a pipeline and all its internal state. NULL-safe. */
 void cbm_pipeline_free(cbm_pipeline_t *p);
 

@@ -1,5 +1,13 @@
 # codebase-memory-mcp
 
+> **Tender Fabric fork status** — This private, pre-publication branch is being
+> developed by **Tender Fabric** (`tenderfabric`) as Tender Index. It preserves
+> the upstream MIT license and attribution while adding detached,
+> commit-addressed project artifacts that can be built in CI without running
+> the installer or changing agent configuration. See
+> [TENDER_FORK.md](TENDER_FORK.md) and
+> [docs/TENDER_PROJECT.md](docs/TENDER_PROJECT.md).
+
 [![GitHub Release](https://img.shields.io/github/v/release/DeusData/codebase-memory-mcp?style=flat&color=blue)](https://github.com/DeusData/codebase-memory-mcp/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/DeusData/codebase-memory-mcp/dry-run.yml?label=CI)](https://github.com/DeusData/codebase-memory-mcp/actions/workflows/dry-run.yml)

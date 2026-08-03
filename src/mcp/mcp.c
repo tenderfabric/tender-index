@@ -383,7 +383,14 @@ static const tool_def_t TOOLS[] = {
      "are normalized.\"},"
      "\"persistence\":{\"type\":\"boolean\",\"default\":false,\"description\":"
      "\"Write compressed artifact to .codebase-memory/graph.db.zst for team sharing. "
-     "Teammates can bootstrap from the artifact instead of full re-indexing.\"}"
+     "Teammates can bootstrap from the artifact instead of full re-indexing.\"},"
+     "\"artifact_output\":{\"type\":\"string\",\"description\":"
+     "\"Absolute detached output root for a commit-addressed project artifact. Requires "
+     "persistence=true and does not modify the source repository.\"},"
+     "\"artifact_input\":{\"type\":\"string\",\"description\":"
+     "\"Absolute detached project-artifact root used as the verified base for this run. The "
+     "payload digest must verify and its source commit must be an ancestor of HEAD; local changes "
+     "are then applied incrementally.\"}"
      "},\"required\":[\"repo_path\"]}"},
 
     {"search_graph", "Search graph",
@@ -6957,14 +6964,35 @@ static char *handle_cross_repo_mode(cbm_mcp_server_t *srv, const char *repo_path
     return out;
 }
 
-/* Bootstrap from artifact if no local DB exists for this project. */
-static void try_artifact_bootstrap(const char *project_name, const char *repo_path) {
+/* Bootstrap from an artifact. A detached project artifact is an explicit base
+ * replacement and has a stricter contract than the legacy repository-carried
+ * artifact: a payload digest is mandatory and the recorded source revision
+ * must be an ancestor of the working repository's HEAD. */
+static int try_artifact_bootstrap(const char *project_name, const char *repo_path,
+                                  const char *artifact_input) {
     char db_buf[CBM_SZ_1K];
     project_db_path(project_name, db_buf, sizeof(db_buf));
-    if (cbm_file_size(db_buf) < 0 && cbm_artifact_exists(repo_path)) {
-        cbm_log_info("index.artifact_bootstrap", "project", project_name);
-        cbm_artifact_import(repo_path, db_buf);
+    if (artifact_input) {
+        if (!cbm_artifact_exists(artifact_input) || !cbm_artifact_verify(artifact_input, true) ||
+            !cbm_artifact_commit_is_ancestor(artifact_input, repo_path)) {
+            cbm_log_error("index.artifact_bootstrap", "err", "detached_artifact_verification");
+            return CBM_NOT_FOUND;
+        }
+        cbm_log_info("index.artifact_bootstrap", "project", project_name, "source", "detached");
+        return cbm_artifact_import_verified(artifact_input, db_buf);
     }
+    if (cbm_file_size(db_buf) >= 0) {
+        return 0;
+    }
+    const char *artifact_root = repo_path;
+    if (!cbm_artifact_exists(artifact_root)) {
+        return 0;
+    }
+    if (cbm_file_size(db_buf) < 0) {
+        cbm_log_info("index.artifact_bootstrap", "project", project_name);
+        return cbm_artifact_import(artifact_root, db_buf);
+    }
+    return 0;
 }
 
 /* Cap on excluded dir paths listed in the response — keep it compact on large
@@ -7185,10 +7213,10 @@ static bool write_skip_logfile(const char *project, const cbm_file_error_t *errs
  * Returns true when status should be "degraded" (#334 plausibility gate). */
 static bool build_index_success_response(cbm_mcp_server_t *srv, yyjson_mut_doc *doc,
                                          yyjson_mut_val *root, const char *project_name,
-                                         const char *repo_path, bool persistence, cbm_pipeline_t *p,
-                                         char **excluded_dirs, int excluded_count,
-                                         const cbm_file_error_t *file_errors, int file_error_count,
-                                         const char *logfile) {
+                                         const char *repo_path, const char *artifact_output,
+                                         bool persistence, cbm_pipeline_t *p, char **excluded_dirs,
+                                         int excluded_count, const cbm_file_error_t *file_errors,
+                                         int file_error_count, const char *logfile) {
     add_excluded_summary(doc, root, excluded_dirs, excluded_count);
     add_skipped_summary(doc, root, file_errors, file_error_count, logfile);
     add_parse_partial_summary(doc, root, file_errors, file_error_count);
@@ -7266,12 +7294,21 @@ static bool build_index_success_response(cbm_mcp_server_t *srv, yyjson_mut_doc *
             "manage_adr(mode='update') to persist architectural insights across sessions.");
     }
 
-    bool has_artifact = cbm_artifact_exists(repo_path);
+    const char *artifact_root = artifact_output ? artifact_output : repo_path;
+    bool has_artifact = cbm_artifact_exists(artifact_root);
     yyjson_mut_obj_add_bool(doc, root, "artifact_present", has_artifact);
     if (persistence && has_artifact) {
-        yyjson_mut_obj_add_str(doc, root, "artifact_hint",
-                               "Persistent artifact written to .codebase-memory/graph.db.zst. "
-                               "Commit this file to share the index with teammates.");
+        if (artifact_output) {
+            yyjson_mut_obj_add_str(doc, root, "artifact_output", artifact_output);
+            yyjson_mut_obj_add_str(
+                doc, root, "artifact_hint",
+                "Verified project artifact written outside the source repository. Publish the "
+                "two files in .codebase-memory as one commit-addressed registry artifact.");
+        } else {
+            yyjson_mut_obj_add_str(doc, root, "artifact_hint",
+                                   "Persistent artifact written to .codebase-memory/graph.db.zst. "
+                                   "Commit this file to share the index with teammates.");
+        }
     }
 
     return degraded;
@@ -7960,9 +7997,30 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     free(mode_str);
 
     bool persistence = cbm_mcp_get_bool_arg(args, "persistence");
+    char *artifact_output = cbm_mcp_get_string_arg(args, "artifact_output");
+    char *artifact_input = cbm_mcp_get_string_arg(args, "artifact_input");
+    cbm_normalize_path_sep(artifact_output);
+    cbm_normalize_path_sep(artifact_input);
+
+    if ((artifact_output && (!persistence || !repo_path_is_absolute(artifact_output) ||
+                             cbm_path_within_root(repo_path, artifact_output))) ||
+        (artifact_input && !repo_path_is_absolute(artifact_input))) {
+        free(artifact_output);
+        free(artifact_input);
+        mcp_project_mutation_end(srv, mutation_project);
+        free(mutation_project);
+        free(name_override);
+        free(repo_path);
+        return cbm_mcp_text_result(
+            "artifact_output requires persistence=true and an absolute path outside the source "
+            "repository; artifact_input must be absolute",
+            true);
+    }
 
     cbm_pipeline_t *p = cbm_pipeline_new(repo_path, NULL, mode);
     if (!p) {
+        free(artifact_output);
+        free(artifact_input);
         mcp_project_mutation_end(srv, mutation_project);
         free(mutation_project);
         free(name_override);
@@ -7971,6 +8029,8 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     }
     if (name_override && name_override[0] && !cbm_pipeline_set_project_name(p, name_override)) {
         cbm_pipeline_free(p);
+        free(artifact_output);
+        free(artifact_input);
         mcp_project_mutation_end(srv, mutation_project);
         free(mutation_project);
         free(name_override);
@@ -7979,11 +8039,30 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
     }
     free(name_override);
     cbm_pipeline_set_persistence(p, persistence);
+    if (artifact_output && !cbm_pipeline_set_artifact_root(p, artifact_output)) {
+        cbm_pipeline_free(p);
+        free(artifact_output);
+        free(artifact_input);
+        mcp_project_mutation_end(srv, mutation_project);
+        free(mutation_project);
+        free(repo_path);
+        return cbm_mcp_text_result("failed to retain artifact_output", true);
+    }
 
     char *project_name = heap_strdup(cbm_pipeline_project_name(p));
 
     /* Bootstrap from artifact if no local DB exists */
-    try_artifact_bootstrap(project_name, repo_path);
+    if (try_artifact_bootstrap(project_name, repo_path, artifact_input) != 0) {
+        cbm_pipeline_free(p);
+        free(project_name);
+        free(artifact_output);
+        free(artifact_input);
+        mcp_project_mutation_end(srv, mutation_project);
+        free(mutation_project);
+        free(repo_path);
+        return cbm_mcp_text_result(
+            "detached project artifact failed digest, source-commit, or import verification", true);
+    }
 
     /* Close cached store — pipeline will delete + recreate the .db file */
     if (srv->owns_store && srv->store) {
@@ -8040,8 +8119,8 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
         bool has_logfile = write_skip_logfile(project_name, file_errors, file_error_count,
                                               logfile_path, sizeof(logfile_path));
         bool degraded = build_index_success_response(
-            srv, doc, root, project_name, repo_path, persistence, p, excluded_dirs, excluded_count,
-            file_errors, file_error_count, has_logfile ? logfile_path : NULL);
+            srv, doc, root, project_name, repo_path, artifact_output, persistence, p, excluded_dirs,
+            excluded_count, file_errors, file_error_count, has_logfile ? logfile_path : NULL);
         yyjson_mut_obj_add_str(doc, root, "status", degraded ? "degraded" : "indexed");
     } else {
         yyjson_mut_obj_add_str(doc, root, "status", "error");
@@ -8064,6 +8143,8 @@ static char *handle_index_repository(cbm_mcp_server_t *srv, const char *args) {
         cbm_pipeline_free(p);
     }
     free(project_name);
+    free(artifact_output);
+    free(artifact_input);
     free(repo_path);
 
     mcp_project_mutation_end(srv, mutation_project);

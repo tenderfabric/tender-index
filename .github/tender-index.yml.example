@@ -1,0 +1,67 @@
+# Copy this file to .github/workflows/tender-index.yml in a source repository.
+# Replace <PINNED_TENDER_INDEX_COMMIT> before enabling it.
+name: Tender Index
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  project-index:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Check out pinned Tender Index engine
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: tenderfabric/tender-index
+          ref: REPLACE_WITH_PINNED_TENDER_INDEX_COMMIT
+          path: engine
+          persist-credentials: false
+
+      - name: Build engine
+        working-directory: engine
+        run: scripts/build.sh
+
+      - name: Build commit-addressed project artifact
+        working-directory: engine
+        run: |
+          scripts/tender-project.sh build \
+            --repo "$GITHUB_WORKSPACE/source" \
+            --output "$RUNNER_TEMP/tender-index-artifact" \
+            --binary "$GITHUB_WORKSPACE/engine/build/c/codebase-memory-mcp"
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1
+        with:
+          version: 1.3.2
+
+      - name: Authenticate to GHCR
+        run: echo "$GITHUB_TOKEN" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push private project artifact
+        working-directory: ${{ runner.temp }}/tender-index-artifact/.codebase-memory
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          image="ghcr.io/${SOURCE_REPOSITORY,,}-tender-index"
+          oras push \
+            --artifact-type application/vnd.tender.index.project.v1 \
+            --annotation "org.opencontainers.image.revision=$SOURCE_COMMIT" \
+            --annotation "org.opencontainers.image.source=https://github.com/$SOURCE_REPOSITORY" \
+            "$image:sha-$SOURCE_COMMIT" \
+            graph.db.zst:application/vnd.tender.index.graph.v1+zstd \
+            artifact.json:application/vnd.tender.index.metadata.v1+json

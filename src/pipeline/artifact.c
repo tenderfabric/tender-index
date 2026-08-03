@@ -28,6 +28,7 @@ enum {
 #include "foundation/compat_fs.h"
 #include "foundation/compat.h"
 #include "foundation/log.h"
+#include "foundation/sha256.h"
 #include "foundation/str_util.h" /* cbm_validate_shell_arg — git shell-out hardening */
 
 #include "zstd_store.h"
@@ -327,11 +328,53 @@ static size_t read_metadata_original_size(const char *repo_path) {
     return result;
 }
 
+/* Read artifact_sha256 from artifact.json. `present` distinguishes a legacy
+ * artifact with no digest from malformed metadata that must fail closed. */
+static bool read_metadata_sha256(const char *artifact_root, char out[CBM_SHA256_HEX_LEN + 1],
+                                 bool *present) {
+    if (!artifact_root || !out) {
+        return false;
+    }
+    out[0] = '\0';
+    if (present) {
+        *present = false;
+    }
+    char meta_path[CBM_SZ_4K];
+    if (!artifact_path(meta_path, sizeof(meta_path), artifact_root, CBM_ARTIFACT_META)) {
+        return false;
+    }
+    size_t len = 0;
+    char *json = read_file_alloc(meta_path, &len);
+    if (!json) {
+        return false;
+    }
+    yyjson_doc *doc = yyjson_read(json, len, 0);
+    free(json);
+    yyjson_val *root = doc ? yyjson_doc_get_root(doc) : NULL;
+    yyjson_val *val = root ? yyjson_obj_get(root, "artifact_sha256") : NULL;
+    if (present) {
+        *present = val != NULL;
+    }
+    const char *digest = val ? yyjson_get_str(val) : NULL;
+    bool valid = digest && strlen(digest) == CBM_SHA256_HEX_LEN;
+    for (size_t i = 0; valid && i < CBM_SHA256_HEX_LEN; i++) {
+        char c = digest[i];
+        valid = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    }
+    if (valid) {
+        memcpy(out, digest, CBM_SHA256_HEX_LEN + 1);
+    }
+    yyjson_doc_free(doc);
+    return valid;
+}
+
 /* Write artifact.json metadata. */
-static int write_metadata(const char *repo_path, const char *project_name, int nodes, int edges,
-                          size_t original_size, size_t compressed_size, int compression_level) {
+static int write_metadata(const char *artifact_root, const char *source_repo_path,
+                          const char *project_name, int nodes, int edges, size_t original_size,
+                          size_t compressed_size, int compression_level,
+                          const char *artifact_sha256) {
     char commit[CBM_SZ_64] = "";
-    git_head_hash(repo_path, commit, sizeof(commit));
+    git_head_hash(source_repo_path, commit, sizeof(commit));
 
     char ts[CBM_SZ_64];
     iso_timestamp(ts, sizeof(ts));
@@ -349,6 +392,7 @@ static int write_metadata(const char *repo_path, const char *project_name, int n
     yyjson_mut_obj_add_uint(doc, root, "original_size", (uint64_t)original_size);
     yyjson_mut_obj_add_uint(doc, root, "compressed_size", (uint64_t)compressed_size);
     yyjson_mut_obj_add_int(doc, root, "compression_level", compression_level);
+    yyjson_mut_obj_add_str(doc, root, "artifact_sha256", artifact_sha256);
 
     size_t json_len = 0;
     char *json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &json_len);
@@ -358,9 +402,9 @@ static int write_metadata(const char *repo_path, const char *project_name, int n
     }
 
     char meta_path[CBM_SZ_4K];
-    if (!artifact_path(meta_path, sizeof(meta_path), repo_path, CBM_ARTIFACT_META)) {
+    if (!artifact_path(meta_path, sizeof(meta_path), artifact_root, CBM_ARTIFACT_META)) {
         free(json);
-        return artifact_export_fail("write_metadata", repo_path, "path_too_long", 0);
+        return artifact_export_fail("write_metadata", artifact_root, "path_too_long", 0);
     }
     artifact_file_error_t ioerr;
     int rc = write_file_atomic(meta_path, json, json_len, &ioerr);
@@ -553,19 +597,20 @@ static char *prepare_snapshot_db(const char *db_path, size_t *out_size, bool str
 
 /* ── Export ───────────────────────────────────────────────────────── */
 
-int cbm_artifact_export(const char *db_path, const char *repo_path, const char *project_name,
-                        int quality) {
+static int artifact_export_internal(const char *db_path, const char *source_repo_path,
+                                    const char *artifact_root, const char *project_name,
+                                    int quality, bool configure_git) {
     clear_export_error();
 
-    if (!db_path || !repo_path || !project_name) {
+    if (!db_path || !source_repo_path || !artifact_root || !project_name) {
         return artifact_export_fail("validate_args", NULL, "missing_argument", 0);
     }
 
     /* Ensure .codebase-memory/ directory exists */
     char art_dir[CBM_SZ_4K];
-    int dir_len = snprintf(art_dir, sizeof(art_dir), "%s/%s", repo_path, CBM_ARTIFACT_DIR);
+    int dir_len = snprintf(art_dir, sizeof(art_dir), "%s/%s", artifact_root, CBM_ARTIFACT_DIR);
     if (dir_len < 0 || (size_t)dir_len >= sizeof(art_dir)) {
-        return artifact_export_fail("prepare_artifact_dir", repo_path, "path_too_long", 0);
+        return artifact_export_fail("prepare_artifact_dir", artifact_root, "path_too_long", 0);
     }
     errno = 0;
     if (!cbm_mkdir_p(art_dir, ART_DIR_PERMS)) {
@@ -616,10 +661,12 @@ int cbm_artifact_export(const char *db_path, const char *repo_path, const char *
 
     /* Write compressed artifact */
     char zst_path[CBM_SZ_4K];
-    if (!artifact_path(zst_path, sizeof(zst_path), repo_path, CBM_ARTIFACT_FILENAME)) {
+    if (!artifact_path(zst_path, sizeof(zst_path), artifact_root, CBM_ARTIFACT_FILENAME)) {
         free(compressed);
-        return artifact_export_fail("write_artifact", repo_path, "path_too_long", 0);
+        return artifact_export_fail("write_artifact", artifact_root, "path_too_long", 0);
     }
+    char artifact_sha256[CBM_SHA256_HEX_LEN + 1];
+    cbm_sha256_hex(compressed, (size_t)clen, artifact_sha256);
     artifact_file_error_t ioerr;
     int wrc = write_file_atomic(zst_path, compressed, (size_t)clen, &ioerr);
     free(compressed);
@@ -639,14 +686,16 @@ int cbm_artifact_export(const char *db_path, const char *repo_path, const char *
     }
 
     /* Write metadata */
-    if (write_metadata(repo_path, project_name, nodes, edges, db_size, (size_t)clen,
-                       compression_level) != 0) {
+    if (write_metadata(artifact_root, source_repo_path, project_name, nodes, edges, db_size,
+                       (size_t)clen, compression_level, artifact_sha256) != 0) {
         cbm_unlink(zst_path);
         return CBM_NOT_FOUND;
     }
 
     /* Ensure .gitattributes for merge conflict prevention */
-    ensure_gitattributes(repo_path);
+    if (configure_git) {
+        ensure_gitattributes(artifact_root);
+    }
 
     double ratio = db_size > 0 ? (double)db_size / (double)clen : 0.0;
     cbm_log_info("artifact.export", "quality", quality == CBM_ARTIFACT_BEST ? "best" : "fast",
@@ -657,9 +706,21 @@ int cbm_artifact_export(const char *db_path, const char *repo_path, const char *
     return 0;
 }
 
+int cbm_artifact_export(const char *db_path, const char *repo_path, const char *project_name,
+                        int quality) {
+    return artifact_export_internal(db_path, repo_path, repo_path, project_name, quality, true);
+}
+
+int cbm_artifact_export_to(const char *db_path, const char *source_repo_path,
+                           const char *artifact_root, const char *project_name, int quality) {
+    return artifact_export_internal(db_path, source_repo_path, artifact_root, project_name, quality,
+                                    false);
+}
+
 /* ── Import ──────────────────────────────────────────────────────── */
 
-int cbm_artifact_import(const char *repo_path, const char *cache_db_path) {
+static int artifact_import_internal(const char *repo_path, const char *cache_db_path,
+                                    bool require_digest) {
     if (!repo_path || !cache_db_path) {
         return CBM_NOT_FOUND;
     }
@@ -688,6 +749,27 @@ int cbm_artifact_import(const char *repo_path, const char *cache_db_path) {
     if (!compressed) {
         cbm_log_error("artifact.import", "err", "read_artifact");
         return CBM_NOT_FOUND;
+    }
+
+    /* New project artifacts bind metadata to the exact compressed payload.
+     * Legacy repository-carried artifacts remain importable, but whenever a
+     * digest is present it is authoritative and tampering fails closed. */
+    char expected_sha256[CBM_SHA256_HEX_LEN + 1];
+    bool digest_present = false;
+    bool digest_valid = read_metadata_sha256(repo_path, expected_sha256, &digest_present);
+    if (!digest_valid && (require_digest || digest_present)) {
+        free(compressed);
+        cbm_log_error("artifact.import", "err", "missing_or_invalid_sha256");
+        return CBM_NOT_FOUND;
+    }
+    if (digest_valid) {
+        char actual_sha256[CBM_SHA256_HEX_LEN + 1];
+        cbm_sha256_hex(compressed, clen, actual_sha256);
+        if (strcmp(expected_sha256, actual_sha256) != 0) {
+            free(compressed);
+            cbm_log_error("artifact.import", "err", "sha256_mismatch");
+            return CBM_NOT_FOUND;
+        }
     }
 
     /* Decompress */
@@ -792,6 +874,14 @@ int cbm_artifact_import(const char *repo_path, const char *cache_db_path) {
     return 0;
 }
 
+int cbm_artifact_import(const char *repo_path, const char *cache_db_path) {
+    return artifact_import_internal(repo_path, cache_db_path, false);
+}
+
+int cbm_artifact_import_verified(const char *artifact_root, const char *cache_db_path) {
+    return artifact_import_internal(artifact_root, cache_db_path, true);
+}
+
 /* ── Existence check ─────────────────────────────────────────────── */
 
 bool cbm_artifact_exists(const char *repo_path) {
@@ -810,6 +900,30 @@ bool cbm_artifact_exists(const char *repo_path) {
     /* Check schema version is compatible */
     int version = read_metadata_version(repo_path);
     return version >= 0 && version <= CBM_ARTIFACT_SCHEMA_VERSION;
+}
+
+bool cbm_artifact_verify(const char *artifact_root, bool require_digest) {
+    if (!artifact_root || !cbm_artifact_exists(artifact_root)) {
+        return false;
+    }
+    char expected[CBM_SHA256_HEX_LEN + 1];
+    bool digest_present = false;
+    if (!read_metadata_sha256(artifact_root, expected, &digest_present)) {
+        return !require_digest && !digest_present;
+    }
+    char zst_path[CBM_SZ_4K];
+    if (!artifact_path(zst_path, sizeof(zst_path), artifact_root, CBM_ARTIFACT_FILENAME)) {
+        return false;
+    }
+    size_t size = 0;
+    char *compressed = read_file_alloc(zst_path, &size);
+    if (!compressed) {
+        return false;
+    }
+    char actual[CBM_SHA256_HEX_LEN + 1];
+    cbm_sha256_hex(compressed, size, actual);
+    free(compressed);
+    return strcmp(expected, actual) == 0;
 }
 
 /* ── Commit hash extraction ──────────────────────────────────────── */
@@ -849,4 +963,34 @@ char *cbm_artifact_commit(const char *repo_path) {
     }
     yyjson_doc_free(doc);
     return result;
+}
+
+bool cbm_artifact_commit_is_ancestor(const char *artifact_root, const char *repo_path) {
+    if (!artifact_root || !repo_path || !cbm_artifact_repo_path_is_shell_safe(repo_path)) {
+        return false;
+    }
+    char *commit = cbm_artifact_commit(artifact_root);
+    if (!commit) {
+        return false;
+    }
+    size_t commit_len = strlen(commit);
+    bool valid = commit_len >= 7 && commit_len < CBM_SZ_64;
+    for (size_t i = 0; valid && i < commit_len; i++) {
+        char c = commit[i];
+        valid = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    }
+    if (!valid) {
+        free(commit);
+        return false;
+    }
+    char cmd[CBM_SZ_1K];
+    int n = snprintf(cmd, sizeof(cmd),
+                     "git -C \"%s\" merge-base --is-ancestor %s HEAD 2>" ARTIFACT_NULL_DEV,
+                     repo_path, commit);
+    free(commit);
+    if (n < 0 || (size_t)n >= sizeof(cmd)) {
+        return false;
+    }
+    FILE *p = cbm_popen(cmd, "r");
+    return p && cbm_pclose(p) == 0;
 }
