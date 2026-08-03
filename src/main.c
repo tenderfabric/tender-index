@@ -1382,9 +1382,9 @@ static char *main_local_cli_daemon_execute(const char *tool_name, const char *ar
         return NULL;
     }
     if (bootstrap.daemon_spawned) {
-        (void)fprintf(stderr, "hint: this command started a temporary CBM daemon. "
-                              "`codebase-memory-mcp daemon start` keeps one warm and removes this "
-                              "startup cost from every CLI command.\n");
+        (void)fprintf(stderr,
+                      "hint: Tender Index started a short-lived worker for this command; it "
+                      "stops when the command completes.\n");
     }
     char session_root[MAIN_PATH_CAP];
     char allowed_root[MAIN_PATH_CAP];

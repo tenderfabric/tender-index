@@ -5079,6 +5079,10 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
         if (project) {
             cbm_tree_scalar_str(&sb, "project", project);
         }
+        cbm_tree_scalar_str(&sb, "map_producer", "tender.map");
+        cbm_tree_scalar_str(&sb, "map_version", "1.0.0");
+        cbm_tree_scalar_str(&sb, "map_disposition",
+                            "deterministic structure and derived communities");
         if (default_summary) {
             cbm_tree_scalar_str(&sb, "aspects_hint",
                                 "Summary view (default). More on request via aspects:[...] — "
@@ -5335,6 +5339,10 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
     if (project) {
         yyjson_mut_obj_add_str(doc, root, "project", project);
     }
+    yyjson_mut_obj_add_str(doc, root, "map_producer", "tender.map");
+    yyjson_mut_obj_add_str(doc, root, "map_version", "1.0.0");
+    yyjson_mut_obj_add_str(doc, root, "map_disposition",
+                           "deterministic structure and derived communities");
     if (default_summary) {
         yyjson_mut_obj_add_str(doc, root, "aspects_hint",
                                "Summary view (default). More on request via aspects:[...] — "

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tender Project — build and consume commit-addressed project-index artifacts.
+# Tender Index internal project-artifact helper.
 #
 # This wrapper intentionally never runs the upstream install command and never
 # edits Claude, Codex, Cursor, or other agent configuration. It only invokes the
@@ -11,10 +11,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
     printf '%s\n' \
+        'Internal helper. Use `tender-index --help` for the supported interface.' \
+        '' \
         'Usage:' \
-        '  scripts/tender-project.sh build  --repo PATH --output PATH [--project NAME] [--binary PATH] [--mode MODE]' \
-        '  scripts/tender-project.sh verify --artifact-root PATH [--repo PATH]' \
-        '  scripts/tender-project.sh load   --repo PATH --artifact-root PATH [--binary PATH] [--mode MODE] [--cache-dir PATH]' \
+        '  tender-index build  [--repo PATH] [--output PATH] [--mode MODE]' \
+        '  tender-index verify [--repo PATH] [--artifact-root PATH]' \
+        '  tender-index load   [--repo PATH] [--artifact-root PATH] [--mode MODE]' \
         '' \
         'Commands:' \
         '  build   Index a clean Git commit into a detached artifact root.' \
@@ -25,7 +27,7 @@ usage() {
 }
 
 die() {
-    printf 'tender-project: %s\n' "$*" >&2
+    printf 'tender-index: %s\n' "$*" >&2
     exit 1
 }
 
@@ -104,7 +106,12 @@ verify_artifact() {
     local root="$1"
     local repo="${2:-}"
     artifact_paths "$root"
-    local expected actual commit
+    local expected actual commit product artifact_type
+    product="$(json_string_field "$ARTIFACT_META" product)"
+    artifact_type="$(json_string_field "$ARTIFACT_META" artifact_type)"
+    [[ "$product" == "tender-index" ]] || die 'artifact is not a Tender Index project artifact'
+    [[ "$artifact_type" == "application/vnd.tender.index.project.v1" ]] ||
+        die 'artifact has an unsupported Tender project contract'
     expected="$(json_string_field "$ARTIFACT_META" artifact_sha256)"
     [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || die 'artifact metadata has no valid SHA-256 digest'
     actual="$(sha256_file "$ARTIFACT_DB")"
@@ -185,7 +192,7 @@ case "$command" in
             --repo-path "$repo" --name "$project" --mode "$mode" --persistence \
             --artifact-output "$output"
         verify_artifact "$output" "$repo"
-        printf 'project artifact: %s/.codebase-memory\n' "$output"
+        printf 'Tender project artifact: %s/.codebase-memory\n' "$output"
         ;;
     verify)
         [[ -n "$artifact_root" ]] || die 'verify requires --artifact-root'

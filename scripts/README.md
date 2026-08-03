@@ -1,5 +1,17 @@
 # scripts/ — the canonical leg entries
 
+## Tender product entry
+
+`scripts/tender-index` is the only public product command. It owns Tender's
+install, project initialization, artifact lifecycle, Map, search, status, and
+read-only MCP doorway. `scripts/tender-project.sh` is its internal artifact
+helper. Neither command invokes the inherited installer or edits agent
+configuration.
+
+The remaining scripts below are engine-development and release legs inherited
+from the upstream C project. They are retained for build and test rigor, not as
+the Tender user experience.
+
 **The doctrine (enforced, not advisory):** *a venue may provision a machine;
 only a canonical leg script may exercise the product.* Local CI, PR CI, the
 dry run and the release all call the SAME files below — venues differ only in

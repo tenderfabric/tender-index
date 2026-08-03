@@ -383,6 +383,10 @@ static int write_metadata(const char *artifact_root, const char *source_repo_pat
     yyjson_mut_val *root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
 
+    yyjson_mut_obj_add_str(doc, root, "product", "tender-index");
+    yyjson_mut_obj_add_str(doc, root, "artifact_type",
+                           "application/vnd.tender.index.project.v1");
+    yyjson_mut_obj_add_int(doc, root, "project_contract_version", 1);
     yyjson_mut_obj_add_int(doc, root, "schema_version", CBM_ARTIFACT_SCHEMA_VERSION);
     yyjson_mut_obj_add_str(doc, root, "commit", commit);
     yyjson_mut_obj_add_str(doc, root, "indexed_at", ts);
@@ -393,6 +397,24 @@ static int write_metadata(const char *artifact_root, const char *source_repo_pat
     yyjson_mut_obj_add_uint(doc, root, "compressed_size", (uint64_t)compressed_size);
     yyjson_mut_obj_add_int(doc, root, "compression_level", compression_level);
     yyjson_mut_obj_add_str(doc, root, "artifact_sha256", artifact_sha256);
+
+    /* A project artifact says which deterministic producers contributed to
+     * the map. This is intentionally a closed first-party manifest, not a
+     * runtime plugin-discovery surface. The code graph is extracted; the
+     * architecture view and communities are derived from those cited edges. */
+    yyjson_mut_val *modules = yyjson_mut_arr(doc);
+    yyjson_mut_val *structure = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_str(doc, structure, "id", "tender.structure");
+    yyjson_mut_obj_add_str(doc, structure, "version", "1.0.0");
+    yyjson_mut_obj_add_str(doc, structure, "disposition", "extracted");
+    yyjson_mut_arr_add_val(modules, structure);
+    yyjson_mut_val *map = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_str(doc, map, "id", "tender.map");
+    yyjson_mut_obj_add_str(doc, map, "version", "1.0.0");
+    yyjson_mut_obj_add_str(doc, map, "disposition", "derived");
+    yyjson_mut_obj_add_str(doc, map, "community_algorithm", "leiden");
+    yyjson_mut_arr_add_val(modules, map);
+    yyjson_mut_obj_add_val(doc, root, "modules", modules);
 
     size_t json_len = 0;
     char *json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &json_len);

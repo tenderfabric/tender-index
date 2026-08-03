@@ -1,117 +1,123 @@
-# Tender Project artifacts
+# Tender Index project artifacts
 
-Tender Index is being developed by **Tender Fabric** as a focused fork of
-`DeusData/codebase-memory-mcp`. The upstream engine supplies the local code
-graph, hybrid search, MCP server, and compressed SQLite artifact. Tender's
-project layer makes that artifact safe to build in CI, address by source
-commit, verify, and load without running the upstream installer or editing any
-agent configuration.
+A Tender project index is a reusable map of one Git repository at one commit.
+It is built outside the source checkout, bound to the compressed graph by
+SHA-256, and addressed by the source commit that produced it.
 
-The repository owner is `tenderfabric`; no other account, organization,
-credential, or repository is part of the design.
+## Why a project artifact exists
 
-## What is in the open project layer
+An AI tool should not spend the beginning of every session rediscovering the
+same architecture. A team also should not check a generated database into its
+main source branch. Tender separates those concerns:
 
-- one repository at one Git commit;
-- a compressed local code graph plus explicit metadata;
-- a SHA-256 binding from metadata to the exact compressed payload;
-- a detached output path, so CI does not add generated files to the source
-  checkout;
-- verified loading when the artifact's commit is an ancestor of the checkout;
-- an incremental local pass over the checkout, which acts as the working-tree
-  or pull-request overlay;
-- an OCI/GHCR recipe that stores each result under `sha-<commit>`.
+1. CI checks out a clean commit and builds the base map once.
+2. The graph and metadata are published as a private OCI artifact.
+3. A local Tender Index verifies the payload and source ancestry.
+4. The current branch or pull request is applied as an incremental overlay.
+5. CLI and MCP tools query the combined local view.
 
-## What is deliberately not here
+## Artifact contents
 
-This layer does not implement Tender Node federation, source grants,
-cross-node fan-out, coverage receipts, ambiguous identity bridges, billing,
-provider credentials, or private transport. It also does not edit Claude,
-Codex, Cursor, Devin, or other client configuration. Those boundaries keep the
-open indexing shell useful without copying private Tender Node/Fabric code into
-the fork.
-
-## Local use
-
-Build the engine:
-
-```bash
-scripts/build.sh
-```
-
-Build a detached artifact for a clean checkout:
-
-```bash
-scripts/tender-project.sh build \
-  --repo /path/to/project \
-  --output /tmp/project-index
-```
-
-The command uses a temporary cache and writes only:
+The detached artifact currently contains:
 
 ```text
-/tmp/project-index/.codebase-memory/graph.db.zst
-/tmp/project-index/.codebase-memory/artifact.json
+.codebase-memory/graph.db.zst
+.codebase-memory/artifact.json
 ```
 
-Verify it without loading:
+`.codebase-memory` is an internal compatibility directory inherited from the
+engine; users install and operate the product exclusively through
+`tender-index`. The metadata records the project, source commit, graph schema,
+node/edge counts, original and compressed sizes, and SHA-256 of the exact
+compressed payload.
+
+The artifact is derived from source and can reveal architecture even though it
+does not contain a normal source checkout. Keep it private when the repository
+is private.
+
+## Local lifecycle
 
 ```bash
-scripts/tender-project.sh verify \
-  --artifact-root /tmp/project-index \
-  --repo /path/to/project
+tender-index build
+tender-index verify
+tender-index load
+tender-index status
+tender-index map
 ```
 
-Load the verified base and apply the selected checkout as an incremental local
-overlay:
+Defaults are computed from the current Git checkout. Advanced callers can
+select explicit paths:
 
 ```bash
-scripts/tender-project.sh load \
+tender-index build \
+  --repo /path/to/project \
+  --output /tmp/project-index
+
+tender-index verify \
+  --repo /path/to/project \
+  --artifact-root /tmp/project-index
+
+tender-index load \
   --repo /path/to/project \
   --artifact-root /tmp/project-index
 ```
 
-Loading fails closed if the payload digest is wrong or if the recorded source
-commit is not an ancestor of the checkout. The command invokes only the
-one-shot CLI; it does not install hooks, background services, skills, or MCP
-entries.
+Build refuses a dirty checkout for a publishable base. Verify rejects a digest
+mismatch and, when a repository is supplied, rejects an artifact commit that
+is not an ancestor of the selected checkout. Load repeats both checks before
+importing and then applies the local checkout incrementally.
+
+No lifecycle command edits AI-client configuration.
 
 ## GitHub Actions and GHCR
 
-This repository proves the path on every `main` commit through
-[`project-index.yml`](../.github/workflows/project-index.yml), publishing its
-own verified index to `ghcr.io/tenderfabric/tender-index-project-index` under a
-`sha-<source-commit>` tag.
-
-[`tender-index.yml.example`](../.github/tender-index.yml.example) is an inactive
-template for a source repository. Its Tender Index checkout is pinned to a
-reviewed immutable commit from the public `tenderfabric/tender-index`
-repository; update that pin deliberately when adopting a newer engine.
-
-The workflow builds the project index from a clean GitHub checkout and pushes
-the two artifact files as one OCI artifact to:
+Run `tender-index init` inside a source repository. It writes
+`.github/workflows/tender-index.yml` pinned to the exact public Tender Index
+revision that installed it. The workflow builds a detached artifact and pushes
+the two files as one OCI artifact:
 
 ```text
 ghcr.io/<owner>/<repository>-tender-index:sha-<source-commit>
 ```
 
-Keep the GHCR package private when the source repository is private. The graph
-is derived from source code; it is not safe to expose merely because it is not
-the source tree itself.
+The media types are:
 
-Pulling is intentionally an explicit act. With ORAS installed:
-
-```bash
-mkdir -p /tmp/project-index/.codebase-memory
-oras pull ghcr.io/OWNER/REPOSITORY-tender-index:sha-COMMIT \
-  -o /tmp/project-index/.codebase-memory
-scripts/tender-project.sh load \
-  --repo /path/to/project \
-  --artifact-root /tmp/project-index
+```text
+application/vnd.tender.index.project.v1
+application/vnd.tender.index.graph.v1+zstd
+application/vnd.tender.index.metadata.v1+json
 ```
 
-## Upstream attribution
+The source workflow is granted only `contents: read` and `packages: write`.
+The Tender engine checkout and third-party actions are pinned to reviewed
+commits.
 
-The fork remains under the upstream MIT license and preserves its copyright
-and notices. Tender Fabric's additions do not erase or replace that
-attribution.
+## Map and retrieval
+
+The base engine persists parsed symbols and typed relationships. Tender's Map
+curates the architecture surface used as project memory:
+
+- languages, packages and entry points;
+- routes and cross-service links;
+- hotspots and package boundaries;
+- inferred architectural layers with their measured reason; and
+- deterministic Leiden communities with membership and cohesion.
+
+Search, path tracing, snippets, graph queries, change detection, and coverage
+remain available through the MCP doorway. Coverage metadata stays separate
+from graph facts so an incomplete parse cannot silently look complete.
+
+## Deliberate boundary
+
+This public layer is one source repository and one project artifact. Tender
+Node federation, grants, cross-node coverage, ambiguous identity bridges,
+signed tool receipts, billing, credentials, and transport are not implemented
+here. The open project artifact is designed to feed that private layer without
+embedding private Fabric code in this repository.
+
+## Attribution
+
+The C engine is based on `DeusData/codebase-memory-mcp` under MIT. Tender
+Fabric preserves the upstream license and notices. The artifact lifecycle,
+Tender command/install surface, and project distribution contract are Tender
+Fabric additions.

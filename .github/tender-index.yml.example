@@ -1,5 +1,5 @@
-# Copy this file to .github/workflows/tender-index.yml in a source repository.
-# The engine checkout is pinned to a reviewed immutable Tender Index commit.
+# Installed by `tender-index init`. The engine checkout is pinned to the exact
+# reviewed Tender Index revision that created this workflow.
 name: Tender Index
 
 on:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: tenderfabric/tender-index
-          ref: 3072940435273adc57a53e54d70edee9e4c38f54
+          ref: TENDER_INDEX_REVISION
           path: engine
           persist-credentials: false
 
@@ -36,10 +36,9 @@ jobs:
       - name: Build commit-addressed project artifact
         working-directory: engine
         run: |
-          scripts/tender-project.sh build \
+          scripts/tender-index build \
             --repo "$GITHUB_WORKSPACE/source" \
-            --output "$RUNNER_TEMP/tender-index-artifact" \
-            --binary "$GITHUB_WORKSPACE/engine/build/c/codebase-memory-mcp"
+            --output "$RUNNER_TEMP/tender-index-artifact"
 
       - name: Install ORAS
         uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1

@@ -1,0 +1,395 @@
+#!/usr/bin/env bash
+# Tender Index — project-scoped code intelligence without agent-config mutation.
+
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SOURCE_ROOT=""
+if [[ -f "$SELF_DIR/../Makefile.cbm" ]]; then
+    SOURCE_ROOT="$(cd "$SELF_DIR/.." && pwd -P)"
+fi
+
+DEFAULT_PREFIX="${TENDER_INDEX_PREFIX:-$HOME/.local}"
+PREFIX="$DEFAULT_PREFIX"
+CACHE_DIR="${TENDER_INDEX_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/tender-index}"
+
+usage() {
+    cat <<'EOF'
+Tender Index — a verified, reusable map of a Git project.
+
+Usage:
+  tender-index install [--prefix PATH] [--binary PATH]
+  tender-index uninstall [--prefix PATH]
+  tender-index init [--repo PATH] [--force]
+  tender-index build [--repo PATH] [--output PATH] [--mode MODE]
+  tender-index verify [--repo PATH] [--artifact-root PATH]
+  tender-index load [--repo PATH] [--artifact-root PATH] [--mode MODE]
+  tender-index search QUERY [--project NAME] [--limit N]
+  tender-index map [--project NAME] [--path PATH]
+  tender-index status [--project NAME]
+  tender-index mcp
+  tender-index doctor
+  tender-index version
+
+The install command installs Tender Index itself. It does not run the upstream
+installer, edit an AI tool's configuration, install hooks, or start a daemon.
+The init command is the one explicit repository mutation: it adds a pinned
+GitHub Actions workflow after showing exactly which path it will write.
+EOF
+}
+
+die() {
+    printf 'tender-index: %s\n' "$*" >&2
+    exit 1
+}
+
+has_arg() {
+    local needle="$1"
+    shift
+    local arg
+    for arg in "$@"; do
+        [[ "$arg" == "$needle" || "$arg" == "$needle="* ]] && return 0
+    done
+    return 1
+}
+
+arg_value() {
+    local needle="$1"
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            "$needle") printf '%s\n' "${2:-}"; return 0 ;;
+            "$needle="*) printf '%s\n' "${1#*=}"; return 0 ;;
+        esac
+        shift
+    done
+    return 1
+}
+
+canonical_repo() {
+    git -C "$1" rev-parse --show-toplevel 2>/dev/null ||
+        die "not a Git repository: $1"
+}
+
+default_repo() {
+    canonical_repo "$PWD"
+}
+
+default_project() {
+    local repo
+    repo="$(default_repo)"
+    basename "$repo"
+}
+
+default_artifact_root() {
+    local repo project commit
+    repo="$(default_repo)"
+    project="$(basename "$repo")"
+    commit="$(git -C "$repo" rev-parse HEAD)"
+    printf '%s/artifacts/%s/%s\n' "$CACHE_DIR" "$project" "$commit"
+}
+
+installed_prefix_from_self() {
+    if [[ "$(basename "$SELF_DIR")" == "bin" ]]; then
+        (cd "$SELF_DIR/.." && pwd -P)
+    else
+        printf '%s\n' "$PREFIX"
+    fi
+}
+
+engine_path() {
+    local candidate installed_prefix
+    if [[ -n "${TENDER_INDEX_ENGINE:-}" ]]; then
+        [[ -x "$TENDER_INDEX_ENGINE" ]] || die "engine is not executable: $TENDER_INDEX_ENGINE"
+        printf '%s\n' "$TENDER_INDEX_ENGINE"
+        return
+    fi
+    installed_prefix="$(installed_prefix_from_self)"
+    for candidate in \
+        "${SOURCE_ROOT:+$SOURCE_ROOT/build/c/codebase-memory-mcp}" \
+        "$installed_prefix/libexec/tender-index/tender-index-engine"; do
+        [[ -n "$candidate" && -x "$candidate" ]] || continue
+        printf '%s\n' "$candidate"
+        return
+    done
+    die 'engine not found; run ./install.sh from a Tender Index checkout'
+}
+
+project_helper() {
+    local candidate installed_prefix
+    installed_prefix="$(installed_prefix_from_self)"
+    for candidate in \
+        "${SOURCE_ROOT:+$SOURCE_ROOT/scripts/tender-project.sh}" \
+        "$installed_prefix/libexec/tender-index/tender-project.sh"; do
+        [[ -n "$candidate" && -x "$candidate" ]] || continue
+        printf '%s\n' "$candidate"
+        return
+    done
+    die 'project helper is missing; reinstall Tender Index'
+}
+
+workflow_template() {
+    local candidate installed_prefix
+    installed_prefix="$(installed_prefix_from_self)"
+    for candidate in \
+        "${SOURCE_ROOT:+$SOURCE_ROOT/.github/tender-index.yml.example}" \
+        "$installed_prefix/libexec/tender-index/tender-index.yml.example"; do
+        [[ -n "$candidate" && -f "$candidate" ]] || continue
+        printf '%s\n' "$candidate"
+        return
+    done
+    die 'workflow template is missing; reinstall Tender Index'
+}
+
+revision_file() {
+    local installed_prefix
+    installed_prefix="$(installed_prefix_from_self)"
+    printf '%s/libexec/tender-index/REVISION\n' "$installed_prefix"
+}
+
+current_revision() {
+    local revision_path
+    if [[ -n "$SOURCE_ROOT" ]] && git -C "$SOURCE_ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+        git -C "$SOURCE_ROOT" rev-parse HEAD
+        return
+    fi
+    revision_path="$(revision_file)"
+    [[ -f "$revision_path" ]] || die 'installed revision is missing; reinstall Tender Index'
+    tr -d '[:space:]' < "$revision_path"
+}
+
+run_engine() {
+    local engine
+    engine="$(engine_path)"
+    mkdir -p "$CACHE_DIR"
+    CBM_CACHE_DIR="$CACHE_DIR" CBM_LOG_LEVEL="${TENDER_INDEX_ENGINE_LOG_LEVEL:-error}" \
+        exec "$engine" "$@"
+}
+
+command_install() {
+    local binary=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prefix) PREFIX="${2:-}"; shift 2 ;;
+            --prefix=*) PREFIX="${1#*=}"; shift ;;
+            --binary) binary="${2:-}"; shift 2 ;;
+            --binary=*) binary="${1#*=}"; shift ;;
+            -h|--help) usage; return ;;
+            *) die "unknown install option: $1" ;;
+        esac
+    done
+    [[ -n "$PREFIX" ]] || die 'install prefix cannot be empty'
+    if [[ -z "$binary" ]]; then
+        [[ -n "$SOURCE_ROOT" ]] || die 'install must run from a Tender Index source checkout'
+        local source_version
+        source_version="0.1.0-tender.$(git -C "$SOURCE_ROOT" rev-parse --short=12 HEAD)"
+        "$SOURCE_ROOT/scripts/build.sh" --version "$source_version"
+        binary="$SOURCE_ROOT/build/c/codebase-memory-mcp"
+    fi
+    [[ -x "$binary" ]] || die "engine is not executable: $binary"
+    [[ -n "$SOURCE_ROOT" ]] || die 'install must run from a Tender Index source checkout'
+
+    local bindir libexec revision
+    bindir="$PREFIX/bin"
+    libexec="$PREFIX/libexec/tender-index"
+    revision="$(current_revision)"
+    mkdir -p "$bindir" "$libexec"
+    install -m 0755 "$binary" "$libexec/tender-index-engine"
+    install -m 0755 "$SOURCE_ROOT/scripts/tender-project.sh" "$libexec/tender-project.sh"
+    install -m 0644 "$SOURCE_ROOT/.github/tender-index.yml.example" \
+        "$libexec/tender-index.yml.example"
+    install -m 0755 "$SOURCE_ROOT/scripts/tender-index" "$bindir/tender-index"
+    printf '%s\n' "$revision" > "$libexec/REVISION"
+
+    printf 'Installed Tender Index\n'
+    printf '  command: %s/tender-index\n' "$bindir"
+    printf '  engine:  %s/tender-index-engine\n' "$libexec"
+    printf '  cache:   %s\n' "$CACHE_DIR"
+    case ":$PATH:" in
+        *":$bindir:"*) ;;
+        *) printf 'Add %s to PATH to use tender-index from any shell.\n' "$bindir" ;;
+    esac
+    printf 'No agent configuration, hooks, or background services were changed.\n'
+}
+
+command_uninstall() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prefix) PREFIX="${2:-}"; shift 2 ;;
+            --prefix=*) PREFIX="${1#*=}"; shift ;;
+            -h|--help) usage; return ;;
+            *) die "unknown uninstall option: $1" ;;
+        esac
+    done
+    rm -f "$PREFIX/bin/tender-index"
+    rm -rf "$PREFIX/libexec/tender-index"
+    printf 'Removed Tender Index from %s. Cached indexes were left at %s.\n' "$PREFIX" "$CACHE_DIR"
+}
+
+command_init() {
+    local repo="" force=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --repo) repo="${2:-}"; shift 2 ;;
+            --repo=*) repo="${1#*=}"; shift ;;
+            --force) force=true; shift ;;
+            -h|--help) usage; return ;;
+            *) die "unknown init option: $1" ;;
+        esac
+    done
+    repo="$(canonical_repo "${repo:-$PWD}")"
+    local target template revision temp
+    target="$repo/.github/workflows/tender-index.yml"
+    template="$(workflow_template)"
+    revision="$(current_revision)"
+    [[ ! -e "$target" || "$force" == true ]] ||
+        die "$target already exists (use --force to replace it)"
+    mkdir -p "$(dirname "$target")"
+    temp="$target.tmp.$$"
+    sed "s#ref: TENDER_INDEX_REVISION#ref: $revision#" "$template" > "$temp"
+    mv "$temp" "$target"
+    printf 'Added %s\n' "$target"
+    printf 'Pinned Tender Index engine: %s\n' "$revision"
+    printf 'Review and commit that one workflow when ready. No agent configuration was changed.\n'
+}
+
+command_build() {
+    local repo output helper engine
+    repo="$(arg_value --repo "$@" || true)"
+    output="$(arg_value --output "$@" || true)"
+    repo="$(canonical_repo "${repo:-$PWD}")"
+    if [[ -z "$output" ]]; then
+        local project commit
+        project="$(basename "$repo")"
+        commit="$(git -C "$repo" rev-parse HEAD)"
+        output="$CACHE_DIR/artifacts/$project/$commit"
+    fi
+    if [[ -d "$output" && -n "$(find "$output" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+        die "artifact output already exists: $output"
+    fi
+    helper="$(project_helper)"
+    engine="$(engine_path)"
+    mkdir -p "$CACHE_DIR"
+    local forwarded=("$@")
+    has_arg --repo "${forwarded[@]}" || forwarded+=(--repo "$repo")
+    has_arg --output "${forwarded[@]}" || forwarded+=(--output "$output")
+    has_arg --binary "${forwarded[@]}" || forwarded+=(--binary "$engine")
+    CBM_CACHE_DIR="$CACHE_DIR" CBM_LOG_LEVEL="${TENDER_INDEX_ENGINE_LOG_LEVEL:-error}" \
+        "$helper" build "${forwarded[@]}"
+}
+
+command_verify_or_load() {
+    local operation="$1"
+    shift
+    local repo artifact helper engine
+    repo="$(arg_value --repo "$@" || true)"
+    artifact="$(arg_value --artifact-root "$@" || true)"
+    repo="$(canonical_repo "${repo:-$PWD}")"
+    if [[ -z "$artifact" ]]; then
+        local project commit
+        project="$(basename "$repo")"
+        commit="$(git -C "$repo" rev-parse HEAD)"
+        artifact="$CACHE_DIR/artifacts/$project/$commit"
+    fi
+    helper="$(project_helper)"
+    engine="$(engine_path)"
+    local forwarded=("$@")
+    has_arg --repo "${forwarded[@]}" || forwarded+=(--repo "$repo")
+    has_arg --artifact-root "${forwarded[@]}" || forwarded+=(--artifact-root "$artifact")
+    if [[ "$operation" == load ]]; then
+        has_arg --binary "${forwarded[@]}" || forwarded+=(--binary "$engine")
+        has_arg --cache-dir "${forwarded[@]}" || forwarded+=(--cache-dir "$CACHE_DIR")
+    fi
+    CBM_CACHE_DIR="$CACHE_DIR" CBM_LOG_LEVEL="${TENDER_INDEX_ENGINE_LOG_LEVEL:-error}" \
+        "$helper" "$operation" "${forwarded[@]}"
+}
+
+command_search() {
+    [[ $# -gt 0 ]] || die 'search requires a query'
+    local query="$1" project="" limit="10"
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project) project="${2:-}"; shift 2 ;;
+            --project=*) project="${1#*=}"; shift ;;
+            --limit) limit="${2:-}"; shift 2 ;;
+            --limit=*) limit="${1#*=}"; shift ;;
+            *) die "unknown search option: $1" ;;
+        esac
+    done
+    project="${project:-$(default_project)}"
+    run_engine cli --json search_code --pattern "$query" --project "$project" --limit "$limit"
+}
+
+command_map() {
+    local project="" path=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project) project="${2:-}"; shift 2 ;;
+            --project=*) project="${1#*=}"; shift ;;
+            --path) path="${2:-}"; shift 2 ;;
+            --path=*) path="${1#*=}"; shift ;;
+            *) die "unknown map option: $1" ;;
+        esac
+    done
+    project="${project:-$(default_project)}"
+    local args=(cli --json get_architecture --project "$project" --aspects overview)
+    [[ -z "$path" ]] || args+=(--path "$path")
+    run_engine "${args[@]}"
+}
+
+command_status() {
+    local project=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project) project="${2:-}"; shift 2 ;;
+            --project=*) project="${1#*=}"; shift ;;
+            *) die "unknown status option: $1" ;;
+        esac
+    done
+    if [[ -n "$project" ]]; then
+        run_engine cli --json index_status --project "$project"
+    else
+        run_engine cli --json list_projects
+    fi
+}
+
+command_doctor() {
+    local engine revision raw_version
+    engine="$(engine_path)"
+    revision="$(current_revision)"
+    printf 'Tender Index doctor\n'
+    printf '  command:  %s\n' "$0"
+    printf '  engine:   %s\n' "$engine"
+    printf '  revision: %s\n' "$revision"
+    printf '  cache:    %s\n' "$CACHE_DIR"
+    printf '  git:      %s\n' "$(command -v git || printf missing)"
+    raw_version="$("$engine" --version)"
+    printf '  version:  Tender Index %s\n' "${raw_version##* }"
+    printf '  policy:   no automatic agent configuration; no install-time daemon\n'
+}
+
+command_version() {
+    local engine raw_version
+    engine="$(engine_path)"
+    raw_version="$("$engine" --version)"
+    printf 'Tender Index %s\n' "${raw_version##* }"
+}
+
+command="${1:-}"
+case "$command" in
+    ''|-h|--help|help) usage ;;
+    install) shift; command_install "$@" ;;
+    uninstall) shift; command_uninstall "$@" ;;
+    init) shift; command_init "$@" ;;
+    build) shift; command_build "$@" ;;
+    verify) shift; command_verify_or_load verify "$@" ;;
+    load) shift; command_verify_or_load load "$@" ;;
+    search) shift; command_search "$@" ;;
+    map) shift; command_map "$@" ;;
+    status) shift; command_status "$@" ;;
+    mcp) shift; [[ $# -eq 0 ]] || die 'mcp takes no arguments'; run_engine --tool-profile analysis ;;
+    doctor) shift; [[ $# -eq 0 ]] || die 'doctor takes no arguments'; command_doctor ;;
+    version|--version) shift; [[ $# -eq 0 ]] || die 'version takes no arguments'; command_version ;;
+    *) usage; die "unknown command: $command" ;;
+esac

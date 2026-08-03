@@ -26,10 +26,11 @@ jobs:
       - name: Install build dependency
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
 
-      - name: Validate project wrapper
+      - name: Validate Tender command
         run: |
+          bash -n scripts/tender-index
           bash -n scripts/tender-project.sh
-          scripts/tender-project.sh --help
+          scripts/tender-index --help
 
       - name: Build Tender Index
         run: scripts/build.sh
@@ -39,23 +40,36 @@ jobs:
           fixture="$RUNNER_TEMP/tender-index-fixture"
           artifact="$RUNNER_TEMP/tender-index-artifact"
           cache="$RUNNER_TEMP/tender-index-cache"
+          export TENDER_INDEX_CACHE_DIR="$cache"
           mkdir -p "$fixture/src"
-          printf '%s\n' 'int tender_add(int a, int b) { return a + b; }' > "$fixture/src/math.c"
+          cp tests/fixtures/tender-project/sample.c "$fixture/src/sample.c"
           git -C "$fixture" init -q
           git -C "$fixture" config user.name 'Tender Index CI'
           git -C "$fixture" config user.email 'ci@tender.invalid'
-          git -C "$fixture" add src/math.c
+          git -C "$fixture" add src/sample.c
           git -C "$fixture" commit -qm fixture
-          scripts/tender-project.sh build \
+          scripts/tender-index build \
             --repo "$fixture" \
-            --output "$artifact" \
-            --binary "$GITHUB_WORKSPACE/build/c/codebase-memory-mcp"
-          scripts/tender-project.sh verify --artifact-root "$artifact" --repo "$fixture"
-          scripts/tender-project.sh load \
+            --output "$artifact"
+          scripts/tender-index verify --artifact-root "$artifact" --repo "$fixture"
+          scripts/tender-index load \
             --repo "$fixture" \
-            --artifact-root "$artifact" \
-            --cache-dir "$cache" \
-            --binary "$GITHUB_WORKSPACE/build/c/codebase-memory-mcp"
+            --artifact-root "$artifact"
           CBM_CACHE_DIR="$cache" build/c/codebase-memory-mcp cli --json search_graph \
-            '{"query":"tender_add","project":"tender-index-fixture"}' \
-            | grep -q 'src/math.c'
+            '{"query":"tender_project_query","project":"tender-index-fixture"}' \
+            | grep -q 'src/sample.c'
+          scripts/tender-index map --project tender-index-fixture \
+            | tee "$RUNNER_TEMP/tender-map.json"
+          grep -q 'map_producer.*tender.map' "$RUNNER_TEMP/tender-map.json"
+          grep -q 'clusters:' "$RUNNER_TEMP/tender-map.json"
+
+      - name: Prove isolated Tender install
+        run: |
+          prefix="$RUNNER_TEMP/tender-prefix"
+          mkdir -p "$prefix/libexec/tender-index"
+          cp /usr/bin/false "$prefix/libexec/tender-index/tender-index-engine"
+          scripts/tender-index install --prefix "$prefix"
+          "$prefix/bin/tender-index" doctor
+          test -x "$prefix/libexec/tender-index/tender-index-engine"
+          test ! -e "$HOME/.claude.json"
+          test ! -e "$HOME/.codex/config.toml"

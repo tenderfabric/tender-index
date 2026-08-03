@@ -180,6 +180,17 @@ TEST(artifact_export_fast_roundtrip) {
     char meta[1024];
     snprintf(meta, sizeof(meta), "%s/.codebase-memory/artifact.json", g_repo);
     ASSERT_EQ(stat(meta, &st), 0);
+    FILE *meta_fp = fopen(meta, "rb");
+    ASSERT_NOT_NULL(meta_fp);
+    char meta_json[4096];
+    size_t meta_len = fread(meta_json, 1, sizeof(meta_json) - 1, meta_fp);
+    fclose(meta_fp);
+    meta_json[meta_len] = '\0';
+    ASSERT_NOT_NULL(strstr(meta_json, "\"product\": \"tender-index\""));
+    ASSERT_NOT_NULL(strstr(meta_json, "application/vnd.tender.index.project.v1"));
+    ASSERT_NOT_NULL(strstr(meta_json, "\"id\": \"tender.structure\""));
+    ASSERT_NOT_NULL(strstr(meta_json, "\"id\": \"tender.map\""));
+    ASSERT_NOT_NULL(strstr(meta_json, "\"community_algorithm\": \"leiden\""));
 
     /* Import to a new path */
     char import_db[1024];

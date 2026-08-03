@@ -32,10 +32,9 @@ jobs:
 
       - name: Build and verify commit-addressed artifact
         run: |
-          scripts/tender-project.sh build \
+          scripts/tender-index build \
             --repo "$GITHUB_WORKSPACE" \
-            --output "$RUNNER_TEMP/tender-index-artifact" \
-            --binary "$GITHUB_WORKSPACE/build/c/codebase-memory-mcp"
+            --output "$RUNNER_TEMP/tender-index-artifact"
 
       - name: Install ORAS
         uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1

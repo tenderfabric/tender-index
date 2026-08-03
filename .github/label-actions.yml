@@ -22,7 +22,7 @@ awaiting-reporter:
     reproduce it ourselves:
 
 
-    - the `codebase-memory-mcp --version` you're on
+    - the output of `tender-index version`
 
     - the exact steps or command you ran
 
